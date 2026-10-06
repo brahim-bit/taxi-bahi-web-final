@@ -13,6 +13,7 @@ type BookingFormState = {
   pickup: string;
   destination: string;
   tripType: string;
+  serviceOption: string;
   date: string;
   time: string;
   notes: string;
@@ -22,7 +23,8 @@ const defaultBookingForm: BookingFormState = {
   pickup: "المدينة",
   destination: "المطار / المدينة",
   tripType: "مطار",
-  date: "2026-10-04",
+  serviceOption: "حجز فوري",
+  date: "",
   time: "09:30",
   notes: "حجز لخطوات الاستقبال"
 };
@@ -55,13 +57,21 @@ export default function Home() {
   const [pageUrl, setPageUrl] = useState("");
   const [booking, setBooking] = useState<BookingFormState>(defaultBookingForm);
   const [bookingStatus, setBookingStatus] = useState("");
+  const [bookingWhatsappUrl, setBookingWhatsappUrl] = useState("");
+  const [minimumBookingDate, setMinimumBookingDate] = useState("");
 
   useEffect(() => {
     setPageUrl(window.location.href);
+    const today = new Date();
+    setMinimumBookingDate(
+      [today.getFullYear(), String(today.getMonth() + 1).padStart(2, "0"), String(today.getDate()).padStart(2, "0")].join("-")
+    );
   }, []);
 
   const updateBooking = (field: keyof BookingFormState, value: string) => {
     setBooking((current) => ({ ...current, [field]: value }));
+    setBookingStatus("");
+    setBookingWhatsappUrl("");
   };
 
   const handleSubmit = (event: FormEvent) => {
@@ -72,15 +82,17 @@ export default function Home() {
       `نقطة الانطلاق: ${booking.pickup}`,
       `الوجهة: ${booking.destination}`,
       `نوع الرحلة: ${booking.tripType}`,
-      `التاريخ: ${booking.date || "غير محدد"}`,
-      `الوقت: ${booking.time || "غير محدد"}`,
+      `التجهيز: ${booking.serviceOption}`,
+      `التاريخ: ${booking.date}`,
+      `الوقت: ${booking.time}`,
       `ملاحظات: ${booking.notes || "لا توجد"}`,
-      "يرجى تأكيد الحجز والمتابعة." 
+      "يرجى تأكيد الحجز والمتابعة."
     ].join("\n");
 
     const whatsappUrl = `${WHATSAPP_URL}&text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, "_blank", "noopener,noreferrer");
-    setBookingStatus("تم تجهيز طلب الحجز وإرساله عبر واتساب بنجاح.");
+    setBookingWhatsappUrl(whatsappUrl);
+    setBookingStatus("تم إعداد تفاصيل الرحلة. أرسل الطلب عبر واتساب لإتمام الحجز.");
   };
 
   return (
@@ -258,11 +270,11 @@ export default function Home() {
           <form className="tb-booking-form" onSubmit={handleSubmit}>
             <label>
               نقطة الانطلاق
-              <input type="text" value={booking.pickup} onChange={(event) => updateBooking("pickup", event.target.value)} />
+              <input type="text" value={booking.pickup} onChange={(event) => updateBooking("pickup", event.target.value)} required />
             </label>
             <label>
               الوجهة
-              <input type="text" value={booking.destination} onChange={(event) => updateBooking("destination", event.target.value)} />
+              <input type="text" value={booking.destination} onChange={(event) => updateBooking("destination", event.target.value)} required />
             </label>
             <div className="tb-inline-fields">
               <label>
@@ -276,17 +288,17 @@ export default function Home() {
               </label>
               <label>
                 التاريخ
-                <input type="date" value={booking.date} onChange={(event) => updateBooking("date", event.target.value)} />
+                <input type="date" value={booking.date} min={minimumBookingDate} onChange={(event) => updateBooking("date", event.target.value)} required />
               </label>
             </div>
             <div className="tb-inline-fields">
               <label>
                 الوقت
-                <input type="time" value={booking.time} onChange={(event) => updateBooking("time", event.target.value)} />
+                <input type="time" value={booking.time} onChange={(event) => updateBooking("time", event.target.value)} required />
               </label>
               <label>
                 التجهيز
-                <select defaultValue="حجز فوري">
+                <select value={booking.serviceOption} onChange={(event) => updateBooking("serviceOption", event.target.value)}>
                   <option value="حجز فوري">حجز فوري</option>
                   <option value="استقبال المطار">استقبال المطار</option>
                   <option value="رحلة خاصة">رحلة خاصة</option>
@@ -298,7 +310,14 @@ export default function Home() {
               <input type="text" value={booking.notes} onChange={(event) => updateBooking("notes", event.target.value)} />
             </label>
             <button type="submit" className="tb-submit-btn">تأكيد الحجز</button>
-            {bookingStatus ? <p className="tb-booking-status">{bookingStatus}</p> : null}
+            {bookingStatus ? (
+              <div className="tb-booking-confirmation" role="status" aria-live="polite">
+                <p className="tb-booking-status">{bookingStatus}</p>
+                <a className="tb-booking-whatsapp-link" href={bookingWhatsappUrl} target="_blank" rel="noopener noreferrer">
+                  فتح رسالة الحجز في واتساب
+                </a>
+              </div>
+            ) : null}
           </form>
 
           <aside className="tb-booking-summary" aria-label="Booking summary">

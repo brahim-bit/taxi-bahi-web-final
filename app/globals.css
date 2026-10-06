@@ -511,6 +511,17 @@ a { color: inherit; text-decoration: none; }
   color: var(--tb-success);
   line-height: 1.6;
 }
+.tb-booking-confirmation {
+  display: grid;
+  gap: 8px;
+}
+.tb-booking-whatsapp-link {
+  color: var(--tb-gold);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .tb-submit-btn {
   width: 100%;
   margin-top: 6px;

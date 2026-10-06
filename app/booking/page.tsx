@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type BookingFormState = {
   pickup: string;
@@ -18,7 +18,7 @@ const defaultBookingForm: BookingFormState = {
   destination: "مطار هواري بومدين",
   tripType: "VIP Airport",
   passengers: "2",
-  date: "2026-10-08",
+  date: "",
   time: "09:30",
   notes: "استقبال عند الوصول مع حقيبة واحدة"
 };
@@ -26,9 +26,20 @@ const defaultBookingForm: BookingFormState = {
 export default function BookingPage() {
   const [booking, setBooking] = useState<BookingFormState>(defaultBookingForm);
   const [status, setStatus] = useState("");
+  const [whatsappUrl, setWhatsappUrl] = useState("");
+  const [minimumBookingDate, setMinimumBookingDate] = useState("");
+
+  useEffect(() => {
+    const today = new Date();
+    setMinimumBookingDate(
+      [today.getFullYear(), String(today.getMonth() + 1).padStart(2, "0"), String(today.getDate()).padStart(2, "0")].join("-")
+    );
+  }, []);
 
   const updateBooking = (field: keyof BookingFormState, value: string) => {
     setBooking((current) => ({ ...current, [field]: value }));
+    setStatus("");
+    setWhatsappUrl("");
   };
 
   const handleSubmit = (event: FormEvent) => {
@@ -46,9 +57,10 @@ export default function BookingPage() {
       "يرجى تأكيد الحجز والمتابعة."
     ].join("\n");
 
-    const whatsappUrl = `https://wa.me/213799409002?s=t&text=${encodeURIComponent(message)}`;
-    window.open(whatsappUrl, "_blank", "noopener,noreferrer");
-    setStatus("تم تجهيز طلب الحجز وإرساله عبر واتساب بنجاح.");
+    const requestUrl = `https://wa.me/213799409002?s=t&text=${encodeURIComponent(message)}`;
+    window.open(requestUrl, "_blank", "noopener,noreferrer");
+    setWhatsappUrl(requestUrl);
+    setStatus("تم إعداد تفاصيل الرحلة. أرسل الطلب عبر واتساب لإتمام الحجز.");
   };
 
   return (
@@ -112,12 +124,12 @@ export default function BookingPage() {
 
           <label>
             نقطة الانطلاق
-            <input type="text" value={booking.pickup} onChange={(event) => updateBooking("pickup", event.target.value)} />
+            <input type="text" value={booking.pickup} onChange={(event) => updateBooking("pickup", event.target.value)} required />
           </label>
 
           <label>
             الوجهة
-            <input type="text" value={booking.destination} onChange={(event) => updateBooking("destination", event.target.value)} />
+            <input type="text" value={booking.destination} onChange={(event) => updateBooking("destination", event.target.value)} required />
           </label>
 
           <div className="tb-inline-fields booking-inline">
@@ -146,12 +158,12 @@ export default function BookingPage() {
           <div className="tb-inline-fields booking-inline">
             <label>
               التاريخ
-              <input type="date" value={booking.date} onChange={(event) => updateBooking("date", event.target.value)} />
+              <input type="date" value={booking.date} min={minimumBookingDate} onChange={(event) => updateBooking("date", event.target.value)} required />
             </label>
 
             <label>
               الوقت
-              <input type="time" value={booking.time} onChange={(event) => updateBooking("time", event.target.value)} />
+              <input type="time" value={booking.time} onChange={(event) => updateBooking("time", event.target.value)} required />
             </label>
           </div>
 
@@ -161,7 +173,14 @@ export default function BookingPage() {
           </label>
 
           <button type="submit" className="tb-submit-btn">تأكيد الحجز</button>
-          {status ? <p className="tb-booking-status">{status}</p> : null}
+          {status ? (
+            <div className="tb-booking-confirmation" role="status" aria-live="polite">
+              <p className="tb-booking-status">{status}</p>
+              <a className="tb-booking-whatsapp-link" href={whatsappUrl} target="_blank" rel="noopener noreferrer">
+                فتح رسالة الحجز في واتساب
+              </a>
+            </div>
+          ) : null}
         </form>
 
         <aside className="tb-booking-summary-detail" aria-label="Reservation summary">
