@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useEffect } from "react";
 
 export type RouteQuote = {
   distanceKm: number;
@@ -15,7 +16,6 @@ type UseRouteQuoteResult = {
   quote: RouteQuote | null;
   isCalculating: boolean;
   error: string;
-  calculateRoute: (origin: string, destination: string, startTime: string) => Promise<void>;
   clearQuote: () => void;
 };
 
@@ -39,7 +39,7 @@ function isRouteQuote(value: unknown): value is RouteQuote {
   );
 }
 
-export function useRouteQuote(): UseRouteQuoteResult {
+export function useRouteQuote(origin: string, destination: string, startTime: string): UseRouteQuoteResult {
   const [quote, setQuote] = useState<RouteQuote | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [error, setError] = useState("");
@@ -49,54 +49,82 @@ export function useRouteQuote(): UseRouteQuoteResult {
     setError("");
   };
 
-  const calculateRoute = async (origin: string, destination: string, startTime: string) => {
-    setIsCalculating(true);
+  useEffect(() => {
+    const trimmedOrigin = origin.trim();
+    const trimmedDestination = destination.trim();
+    const controller = new AbortController();
+    let requestTimeout: ReturnType<typeof setTimeout> | undefined;
+    let didTimeout = false;
+
     setQuote(null);
     setError("");
+    setIsCalculating(false);
 
-    try {
-      const response = await fetch("/api/route-distance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ origin, destination, startTime }),
-        signal: AbortSignal.timeout(45000)
-      });
-
-      let result: unknown;
-      try {
-        result = await response.json();
-      } catch {
-        throw new Error("تعذر قراءة استجابة خدمة حساب المسار. حاول مجددًا.");
-      }
-
-      if (!response.ok) {
-        const message =
-          typeof result === "object" &&
-          result !== null &&
-          "error" in result &&
-          typeof result.error === "string"
-            ? result.error
-            : "تعذر حساب المسافة. حاول مجددًا.";
-        throw new Error(message);
-      }
-
-      if (!isRouteQuote(result)) {
-        throw new Error("استلمنا نتيجة غير صالحة للمسار. حاول مجددًا.");
-      }
-
-      setQuote(result);
-    } catch (cause) {
-      const message =
-        cause instanceof Error && cause.name === "TimeoutError"
-          ? "استغرق حساب المسافة وقتًا طويلًا. تحقق من الاتصال وحاول مجددًا."
-          : cause instanceof Error
-            ? cause.message
-            : "تعذر حساب المسافة. حاول مجددًا.";
-      setError(message);
-    } finally {
-      setIsCalculating(false);
+    if (!trimmedOrigin || !trimmedDestination || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(startTime)) {
+      return () => controller.abort();
     }
-  };
 
-  return { quote, isCalculating, error, calculateRoute, clearQuote };
+    const debounce = setTimeout(() => {
+      setIsCalculating(true);
+      requestTimeout = setTimeout(() => {
+        didTimeout = true;
+        controller.abort();
+      }, 45000);
+
+      void (async () => {
+        try {
+          const response = await fetch("/api/route-distance", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ origin: trimmedOrigin, destination: trimmedDestination, startTime }),
+            signal: controller.signal
+          });
+
+          let result: unknown;
+          try {
+            result = await response.json();
+          } catch {
+            throw new Error("تعذر قراءة استجابة خدمة حساب المسار. حاول مجددًا.");
+          }
+
+          if (!response.ok) {
+            const message =
+              typeof result === "object" &&
+              result !== null &&
+              "error" in result &&
+              typeof result.error === "string"
+                ? result.error
+                : "تعذر حساب المسافة. حاول مجددًا.";
+            throw new Error(message);
+          }
+
+          if (!isRouteQuote(result)) {
+            throw new Error("استلمنا نتيجة غير صالحة للمسار. حاول مجددًا.");
+          }
+
+          setQuote(result);
+        } catch (cause) {
+          if (!controller.signal.aborted) {
+            setError(cause instanceof Error ? cause.message : "تعذر حساب المسافة. حاول مجددًا.");
+          } else if (didTimeout) {
+            setError("استغرق حساب المسافة وقتًا طويلًا. تحقق من الاتصال وحاول مجددًا.");
+          }
+        } finally {
+          if (!controller.signal.aborted) {
+            setIsCalculating(false);
+          }
+        }
+      })();
+    }, 700);
+
+    return () => {
+      clearTimeout(debounce);
+      if (requestTimeout) {
+        clearTimeout(requestTimeout);
+      }
+      controller.abort();
+    };
+  }, [origin, destination, startTime]);
+
+  return { quote, isCalculating, error, clearQuote };
 }

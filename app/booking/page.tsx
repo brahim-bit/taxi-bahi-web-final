@@ -29,7 +29,11 @@ export default function BookingPage() {
   const [status, setStatus] = useState("");
   const [whatsappUrl, setWhatsappUrl] = useState("");
   const [minimumBookingDate, setMinimumBookingDate] = useState("");
-  const { quote, isCalculating, error: routeError, calculateRoute, clearQuote } = useRouteQuote();
+  const { quote, isCalculating, error: routeError, clearQuote } = useRouteQuote(
+    booking.pickup,
+    booking.destination,
+    booking.time
+  );
 
   useEffect(() => {
     const today = new Date();
@@ -51,7 +55,7 @@ export default function BookingPage() {
     event.preventDefault();
 
     if (!quote) {
-      setStatus("احسب المسافة والتكلفة أولًا قبل تأكيد الحجز.");
+      setStatus("انتظر حساب المسافة والتكلفة تلقائيًا قبل تأكيد الحجز.");
       return;
     }
 
@@ -186,21 +190,8 @@ export default function BookingPage() {
           </label>
 
           <p className="tb-route-rate-note">نهارًا: 400 دج لكل 100 كم. ليلًا (21:00–05:00): 150 دج لكل 30 كم. تُحدد التعرفة بحسب وقت الانطلاق.</p>
-          <button
-            type="button"
-            className="tb-submit-btn tb-route-quote-button"
-            onClick={() => void calculateRoute(booking.pickup, booking.destination, booking.time)}
-            disabled={isCalculating || !booking.pickup.trim() || !booking.destination.trim()}
-          >
-            {isCalculating ? "جارٍ حساب مسار القيادة..." : "احسب المسافة والتكلفة"}
-          </button>
+          <p className="tb-route-rate-note">ستُحسب المسافة والمدة والتكلفة تلقائيًا بعد إدخال الموقعين.</p>
           {routeError ? <p className="tb-route-error" role="alert">{routeError}</p> : null}
-          {quote ? (
-            <div className="tb-route-result" role="status" aria-live="polite">
-              <span>تعرفة {quote.tariffPeriod}: {quote.rateDZDPerKm} دج لكل كم، حسب وقت الانطلاق.</span>
-              <a href={quote.mapUrl} target="_blank" rel="noopener noreferrer">عرض المسار على الخريطة</a>
-            </div>
-          ) : null}
           <button type="submit" className="tb-submit-btn">تأكيد الحجز</button>
           {status ? (
             <div className="tb-booking-confirmation" role="status" aria-live="polite">
@@ -225,11 +216,11 @@ export default function BookingPage() {
             </div>
             <div className="tb-summary-row">
               <span>المسافة</span>
-              <strong>{quote ? `${quote.distanceKm.toFixed(1)} كم` : "—"}</strong>
+              <strong>{quote ? `${quote.distanceKm.toFixed(1)} كم` : isCalculating ? "جارٍ الحساب..." : booking.pickup && booking.destination ? "سيُحسب تلقائيًا" : "—"}</strong>
             </div>
             <div className="tb-summary-row">
               <span>المدة</span>
-              <strong>{quote ? `${quote.durationMinutes} دقيقة تقريبًا` : "—"}</strong>
+              <strong>{quote ? `${quote.durationMinutes} دقيقة تقريبًا` : isCalculating ? "جارٍ الحساب..." : booking.pickup && booking.destination ? "سيُحسب تلقائيًا" : "—"}</strong>
             </div>
             <div className="tb-summary-row">
               <span>نوع السيارة</span>
@@ -239,11 +230,17 @@ export default function BookingPage() {
 
           <div className="tb-summary-total-detail">
             <span>السعر التقديري</span>
-            <strong>{quote ? `${quote.fareDZD.toLocaleString("ar-DZ")} دج` : "احسب المسافة أولًا"}</strong>
+            <strong>{quote ? `${quote.fareDZD.toLocaleString("ar-DZ")} دج` : isCalculating ? "جارٍ الحساب..." : "—"}</strong>
           </div>
 
           <div className="tb-summary-meta">
             <p>خدمة مخصصة بانتظارك، مع متابعة دقيقة للتجهيز والاستقبال.</p>
+            {quote ? (
+              <div className="tb-route-result" role="status" aria-live="polite">
+                <span>تعرفة {quote.tariffPeriod}: {quote.rateDZDPerKm} دج/كم</span>
+                <a href={quote.mapUrl} target="_blank" rel="noopener noreferrer">عرض المسار على الخريطة</a>
+              </div>
+            ) : null}
           </div>
         </aside>
       </section>
