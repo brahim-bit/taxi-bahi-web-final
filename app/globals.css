@@ -511,6 +511,38 @@ a { color: inherit; text-decoration: none; }
   color: var(--tb-success);
   line-height: 1.6;
 }
+.tb-route-quote-button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+  opacity: 0.65;
+  transform: none;
+}
+.tb-route-result {
+  display: grid;
+  gap: 6px;
+  color: var(--tb-muted);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.tb-route-result a {
+  color: var(--tb-gold);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.tb-route-rate-note,
+.tb-price-night {
+  margin: 0;
+  color: var(--tb-muted);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+.tb-route-error {
+  margin: 0;
+  color: #ffb4a9;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
 .tb-booking-confirmation {
   display: grid;
   gap: 8px;

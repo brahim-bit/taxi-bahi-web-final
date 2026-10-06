@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
+import { useRouteQuote } from "../hooks/useRouteQuote";
 
 type BookingFormState = {
   pickup: string;
@@ -14,8 +15,8 @@ type BookingFormState = {
 };
 
 const defaultBookingForm: BookingFormState = {
-  pickup: "المدينة",
-  destination: "مطار هواري بومدين",
+  pickup: "",
+  destination: "",
   tripType: "VIP Airport",
   passengers: "2",
   date: "",
@@ -28,6 +29,7 @@ export default function BookingPage() {
   const [status, setStatus] = useState("");
   const [whatsappUrl, setWhatsappUrl] = useState("");
   const [minimumBookingDate, setMinimumBookingDate] = useState("");
+  const { quote, isCalculating, error: routeError, calculateRoute, clearQuote } = useRouteQuote();
 
   useEffect(() => {
     const today = new Date();
@@ -40,10 +42,18 @@ export default function BookingPage() {
     setBooking((current) => ({ ...current, [field]: value }));
     setStatus("");
     setWhatsappUrl("");
+    if (field === "pickup" || field === "destination" || field === "time") {
+      clearQuote();
+    }
   };
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (!quote) {
+      setStatus("احسب المسافة والتكلفة أولًا قبل تأكيد الحجز.");
+      return;
+    }
 
     const message = [
       "مرحبًا Taxi Bahi، أود حجز رحلة فاخرة.",
@@ -51,8 +61,11 @@ export default function BookingPage() {
       `الوجهة: ${booking.destination}`,
       `نوع الرحلة: ${booking.tripType}`,
       `عدد الركاب: ${booking.passengers}`,
-      `التاريخ: ${booking.date || "غير محدد"}`,
-      `الوقت: ${booking.time || "غير محدد"}`,
+      `مسافة القيادة: ${quote.distanceKm.toFixed(1)} كم`,
+      `التعرفة ${quote.tariffPeriod}: ${quote.rateDZDPerKm} دج/كم`,
+      `التكلفة التقديرية: ${quote.fareDZD} دج`,
+      `التاريخ: ${booking.date}`,
+      `الوقت: ${booking.time}`,
       `ملاحظات: ${booking.notes || "لا توجد"}`,
       "يرجى تأكيد الحجز والمتابعة."
     ].join("\n");
@@ -124,12 +137,12 @@ export default function BookingPage() {
 
           <label>
             نقطة الانطلاق
-            <input type="text" value={booking.pickup} onChange={(event) => updateBooking("pickup", event.target.value)} required />
+            <input type="text" maxLength={200} placeholder="مثال: ساحة الشهداء، الجزائر" value={booking.pickup} onChange={(event) => updateBooking("pickup", event.target.value)} required disabled={isCalculating} />
           </label>
 
           <label>
             الوجهة
-            <input type="text" value={booking.destination} onChange={(event) => updateBooking("destination", event.target.value)} required />
+            <input type="text" maxLength={200} placeholder="مثال: مطار هواري بومدين، الجزائر" value={booking.destination} onChange={(event) => updateBooking("destination", event.target.value)} required disabled={isCalculating} />
           </label>
 
           <div className="tb-inline-fields booking-inline">
@@ -172,6 +185,22 @@ export default function BookingPage() {
             <textarea value={booking.notes} onChange={(event) => updateBooking("notes", event.target.value)} rows={4} />
           </label>
 
+          <p className="tb-route-rate-note">نهارًا: 400 دج لكل 100 كم. ليلًا (21:00–05:00): 150 دج لكل 30 كم. تُحدد التعرفة بحسب وقت الانطلاق.</p>
+          <button
+            type="button"
+            className="tb-submit-btn tb-route-quote-button"
+            onClick={() => void calculateRoute(booking.pickup, booking.destination, booking.time)}
+            disabled={isCalculating || !booking.pickup.trim() || !booking.destination.trim()}
+          >
+            {isCalculating ? "جارٍ حساب مسار القيادة..." : "احسب المسافة والتكلفة"}
+          </button>
+          {routeError ? <p className="tb-route-error" role="alert">{routeError}</p> : null}
+          {quote ? (
+            <div className="tb-route-result" role="status" aria-live="polite">
+              <span>تعرفة {quote.tariffPeriod}: {quote.rateDZDPerKm} دج لكل كم، حسب وقت الانطلاق.</span>
+              <a href={quote.mapUrl} target="_blank" rel="noopener noreferrer">عرض المسار على الخريطة</a>
+            </div>
+          ) : null}
           <button type="submit" className="tb-submit-btn">تأكيد الحجز</button>
           {status ? (
             <div className="tb-booking-confirmation" role="status" aria-live="polite">
@@ -196,11 +225,11 @@ export default function BookingPage() {
             </div>
             <div className="tb-summary-row">
               <span>المسافة</span>
-              <strong>28 km</strong>
+              <strong>{quote ? `${quote.distanceKm.toFixed(1)} كم` : "—"}</strong>
             </div>
             <div className="tb-summary-row">
               <span>المدة</span>
-              <strong>30 دقيقة</strong>
+              <strong>{quote ? `${quote.durationMinutes} دقيقة تقريبًا` : "—"}</strong>
             </div>
             <div className="tb-summary-row">
               <span>نوع السيارة</span>
@@ -209,8 +238,8 @@ export default function BookingPage() {
           </div>
 
           <div className="tb-summary-total-detail">
-            <span>التكلفة التقديرية</span>
-            <strong>1,200 دج</strong>
+            <span>السعر التقديري</span>
+            <strong>{quote ? `${quote.fareDZD.toLocaleString("ar-DZ")} دج` : "احسب المسافة أولًا"}</strong>
           </div>
 
           <div className="tb-summary-meta">
