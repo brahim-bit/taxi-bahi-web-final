@@ -116,7 +116,7 @@ export function useRouteQuote(origin: string, destination: string, startTime: st
           }
         }
       })();
-    }, 700);
+    }, 2000);
 
     return () => {
       isCurrentRequest = false;
