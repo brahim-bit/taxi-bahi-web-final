@@ -1,63 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const NOMINATIM_USER_AGENT = "TaxiBahi/1.0 (https://github.com/brahim-bit/taxi-bahi-web-final)";
-const GEOCODING_INTERVAL_MS = 1100;
 const NIGHT_TARIFF_START = "21:00";
 const NIGHT_TARIFF_END = "05:00";
 
-type GeocodingResult = {
-  lat: string;
-  lon: string;
-  name?: string;
-  display_name?: string;
-  addresstype?: string;
+type GoogleGeocodingResult = {
+  formattedAddress: string;
+  latitude: number;
+  longitude: number;
+  countryCode: string;
+  administrativeArea: string;
 };
 
-type OsrmRouteResponse = {
-  code: string;
-  routes: Array<{
-    distance: number;
-    duration: number;
-  }>;
+type GoogleRoute = {
+  distanceMeters: number;
+  durationSeconds: number;
 };
-
-function isGeocodingResult(value: unknown): value is GeocodingResult {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const result = value as Record<string, unknown>;
-  return (
-    typeof result.lat === "string" &&
-    typeof result.lon === "string" &&
-    Number.isFinite(Number(result.lat)) &&
-    Number.isFinite(Number(result.lon)) &&
-    (result.name === undefined || typeof result.name === "string") &&
-    (result.display_name === undefined || typeof result.display_name === "string") &&
-    (result.addresstype === undefined || typeof result.addresstype === "string")
-  );
-}
-
-function isOsrmRouteResponse(value: unknown): value is OsrmRouteResponse {
-  if (typeof value !== "object" || value === null || !("code" in value) || !("routes" in value)) {
-    return false;
-  }
-  if (typeof value.code !== "string" || !Array.isArray(value.routes)) {
-    return false;
-  }
-
-  return value.routes.every(
-    (route) =>
-      typeof route === "object" &&
-      route !== null &&
-      "distance" in route &&
-      "duration" in route &&
-      typeof route.distance === "number" &&
-      Number.isFinite(route.distance) &&
-      typeof route.duration === "number" &&
-      Number.isFinite(route.duration)
-  );
-}
 
 class RouteLookupError extends Error {
   constructor(message: string, readonly status: number) {
@@ -66,71 +23,160 @@ class RouteLookupError extends Error {
   }
 }
 
-let nextGeocodingRequestAt = 0;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
-async function geocode(address: string, label: string): Promise<GeocodingResult> {
-  const waitMs = Math.max(0, nextGeocodingRequestAt - Date.now());
-  nextGeocodingRequestAt = Math.max(Date.now(), nextGeocodingRequestAt) + GEOCODING_INTERVAL_MS;
+function getGoogleErrorMessage(value: unknown): string | undefined {
+  if (!isRecord(value) || !isRecord(value.error) || typeof value.error.message !== "string") {
+    return undefined;
+  }
+  return value.error.message;
+}
 
-  if (waitMs > 0) {
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
+function parseGoogleGeocodingResult(value: unknown): GoogleGeocodingResult | null {
+  if (!isRecord(value) || !isRecord(value.geometry) || !isRecord(value.geometry.location)) {
+    return null;
+  }
+  if (
+    typeof value.formatted_address !== "string" ||
+    typeof value.geometry.location.lat !== "number" ||
+    !Number.isFinite(value.geometry.location.lat) ||
+    typeof value.geometry.location.lng !== "number" ||
+    !Number.isFinite(value.geometry.location.lng) ||
+    !Array.isArray(value.address_components)
+  ) {
+    return null;
   }
 
-  const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("q", address);
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", "5");
-  url.searchParams.set("countrycodes", "dz");
+  let countryCode = "";
+  let administrativeArea = "";
+  for (const component of value.address_components) {
+    if (
+      !isRecord(component) ||
+      !Array.isArray(component.types) ||
+      typeof component.long_name !== "string" ||
+      typeof component.short_name !== "string"
+    ) {
+      continue;
+    }
 
+    if (component.types.includes("country")) {
+      countryCode = component.short_name.toUpperCase();
+    }
+    if (component.types.includes("administrative_area_level_1")) {
+      administrativeArea = component.long_name;
+    }
+  }
+
+  return {
+    formattedAddress: value.formatted_address,
+    latitude: value.geometry.location.lat,
+    longitude: value.geometry.location.lng,
+    countryCode,
+    administrativeArea
+  };
+}
+
+function isAllowedLocation(location: GoogleGeocodingResult): boolean {
+  if (location.countryCode === "DZ") {
+    return true;
+  }
+
+  return location.countryCode === "TN" && /tunis|تونس/i.test(location.administrativeArea);
+}
+
+async function fetchGoogleJson(url: URL, init: RequestInit, timeoutMessage: string): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(url, {
-      headers: {
-        "Accept-Language": "ar",
-        "User-Agent": NOMINATIM_USER_AGENT
-      },
-      signal: AbortSignal.timeout(12000),
-      cache: "no-store"
-    });
+    response = await fetch(url, { ...init, signal: AbortSignal.timeout(15000), cache: "no-store" });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new RouteLookupError("انتهت مهلة البحث عن المواقع. حاول مجددًا.", 504);
+      throw new RouteLookupError(timeoutMessage, 504);
     }
-    throw new RouteLookupError("تعذر الاتصال بخدمة البحث عن المواقع. حاول مجددًا.", 502);
+    throw new RouteLookupError("تعذر الاتصال بخدمة Google Maps. تحقق من الإعدادات وحاول مجددًا.", 502);
   }
 
-  if (response.status === 429) {
-    throw new RouteLookupError("خدمة الخرائط مشغولة حاليًا. انتظر قليلًا ثم حاول مجددًا.", 503);
-  }
-  if (!response.ok) {
-    throw new RouteLookupError("تعذر البحث عن الموقع على الخريطة. حاول مجددًا.", 502);
-  }
-
-  let locations: unknown;
+  let result: unknown;
   try {
-    locations = await response.json();
+    result = await response.json();
   } catch {
-    throw new RouteLookupError("تعذر قراءة نتيجة البحث عن الموقع. حاول مجددًا.", 502);
+    throw new RouteLookupError("تعذر قراءة استجابة Google Maps. حاول مجددًا.", 502);
   }
 
-  if (!Array.isArray(locations)) {
-    throw new RouteLookupError("استلمنا نتيجة غير صالحة للبحث عن الموقع. حاول مجددًا.", 502);
+  if (!response.ok) {
+    const detail = getGoogleErrorMessage(result);
+    if (response.status === 429) {
+      throw new RouteLookupError("تجاوزت خدمة الخرائط حد الطلبات مؤقتًا. حاول لاحقًا.", 503);
+    }
+    if (response.status === 403) {
+      throw new RouteLookupError(
+        "رفضت Google Maps الطلب. تحقق من تفعيل Geocoding API وRoutes API والفوترة وقيود المفتاح.",
+        503
+      );
+    }
+    throw new RouteLookupError(detail ? `تعذر إكمال طلب Google Maps: ${detail}` : "تعذر حساب المسار. حاول مجددًا.", 502);
   }
 
-  const candidates = locations.filter(isGeocodingResult);
-  if (candidates.length === 0) {
-    throw new RouteLookupError(`لم نعثر على ${label}. أضف اسم الحي والمدينة ثم حاول مجددًا.`, 422);
+  return result;
+}
+
+async function geocodeAddress(address: string, label: string, apiKey: string): Promise<GoogleGeocodingResult> {
+  const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+  url.searchParams.set("address", address);
+  url.searchParams.set("language", "ar");
+  url.searchParams.set("key", apiKey);
+
+  const response = await fetchGoogleJson(url, {}, "انتهت مهلة البحث عن الموقع. حاول مجددًا.");
+  if (!isRecord(response) || typeof response.status !== "string" || !Array.isArray(response.results)) {
+    throw new RouteLookupError("استلمنا نتيجة غير صالحة من خدمة تحديد المواقع.", 502);
+  }
+  if (response.status === "ZERO_RESULTS") {
+    throw new RouteLookupError(`لم نعثر على ${label}. تحقق من العنوان ثم حاول مجددًا.`, 422);
+  }
+  if (response.status !== "OK") {
+    if (response.status === "OVER_QUERY_LIMIT") {
+      throw new RouteLookupError("تجاوزت حصة Google Maps المتاحة. تحقق من إعدادات الفوترة والحصة.", 503);
+    }
+    if (response.status === "REQUEST_DENIED") {
+      throw new RouteLookupError("رفضت Google Maps البحث. تحقق من تفعيل Geocoding API وصلاحية المفتاح.", 503);
+    }
+    throw new RouteLookupError("تعذر البحث عن الموقع في Google Maps. حاول مجددًا.", 502);
   }
 
-  const explicitlyAdministrative = /ولاية|wilaya|province|state/i.test(address);
-  if (explicitlyAdministrative) {
-    return candidates[0];
+  const results = response.results
+    .map(parseGoogleGeocodingResult)
+    .filter((result): result is GoogleGeocodingResult => result !== null);
+  const location = results.find(isAllowedLocation);
+
+  if (!location) {
+    throw new RouteLookupError(
+      `${label} خارج نطاق الخدمة. نقبل العناوين في الجزائر أو في ولاية تونس فقط.`,
+      422
+    );
   }
 
-  const preciseMatch = candidates.find(
-    (candidate) => !["state", "province", "region"].includes(candidate.addresstype ?? "")
-  );
-  return preciseMatch ?? candidates[0];
+  return location;
+}
+
+function parseGoogleRoute(value: unknown): GoogleRoute | null {
+  if (!isRecord(value) || !Array.isArray(value.routes)) {
+    return null;
+  }
+  const route = value.routes[0];
+  if (!isRecord(route) || typeof route.distanceMeters !== "number" || !Number.isFinite(route.distanceMeters)) {
+    return null;
+  }
+  if (typeof route.duration !== "string" || !route.duration.endsWith("s")) {
+    return null;
+  }
+
+  const durationSeconds = Number(route.duration.slice(0, -1));
+  if (!Number.isFinite(durationSeconds)) {
+    return null;
+  }
+
+  return { distanceMeters: route.distanceMeters, durationSeconds };
 }
 
 export async function POST(request: NextRequest) {
@@ -141,24 +187,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "بيانات الطلب غير صالحة." }, { status: 400 });
   }
 
-  if (typeof body !== "object" || body === null || !("origin" in body) || !("destination" in body)) {
-    return NextResponse.json({ error: "أدخل موقعي الانطلاق والوجهة." }, { status: 400 });
-  }
-
-  if (!("startTime" in body)) {
-    return NextResponse.json({ error: "أدخل وقت الانطلاق لحساب التعرفة المناسبة." }, { status: 400 });
-  }
-
-  const { origin, destination, startTime } = body;
   if (
-    typeof origin !== "string" ||
-    typeof destination !== "string" ||
-    typeof startTime !== "string" ||
-    !origin.trim() ||
-    !destination.trim() ||
-    origin.length > 200 ||
-    destination.length > 200 ||
-    !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(startTime)
+    !isRecord(body) ||
+    typeof body.origin !== "string" ||
+    typeof body.destination !== "string" ||
+    typeof body.startTime !== "string" ||
+    !body.origin.trim() ||
+    !body.destination.trim() ||
+    body.origin.length > 200 ||
+    body.destination.length > 200 ||
+    !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(body.startTime)
   ) {
     return NextResponse.json(
       { error: "تحقق من موقعي الانطلاق والوجهة ووقت الانطلاق، ويجب ألا يتجاوز كل عنوان 200 حرف." },
@@ -166,75 +204,67 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "أضف GOOGLE_MAPS_API_KEY إلى ملف .env.local لتفعيل حساب المسار." },
+      { status: 503 }
+    );
+  }
+
   try {
-    const originLocation = await geocode(origin.trim(), "نقطة الانطلاق");
-    const destinationLocation = await geocode(destination.trim(), "الوجهة");
+    const origin = await geocodeAddress(body.origin.trim(), "نقطة الانطلاق", apiKey);
+    const destination = await geocodeAddress(body.destination.trim(), "الوجهة", apiKey);
+    const routeResponse = await fetchGoogleJson(
+      new URL("https://routes.googleapis.com/directions/v2:computeRoutes"),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": apiKey,
+          "X-Goog-FieldMask": "routes.distanceMeters,routes.duration"
+        },
+        body: JSON.stringify({
+          origin: { location: { latLng: { latitude: origin.latitude, longitude: origin.longitude } } },
+          destination: { location: { latLng: { latitude: destination.latitude, longitude: destination.longitude } } },
+          travelMode: "DRIVE",
+          routingPreference: "TRAFFIC_UNAWARE",
+          languageCode: "ar",
+          units: "METRIC"
+        })
+      },
+      "انتهت مهلة حساب مسار القيادة. حاول مجددًا."
+    );
+    const route = parseGoogleRoute(routeResponse);
 
-    const coordinates = [
-      `${originLocation.lon},${originLocation.lat}`,
-      `${destinationLocation.lon},${destinationLocation.lat}`
-    ].join(";");
-    let routeResponse: Response;
-    try {
-      routeResponse = await fetch(
-        `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=false`,
-        { signal: AbortSignal.timeout(15000), cache: "no-store" }
-      );
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "TimeoutError") {
-        throw new RouteLookupError("انتهت مهلة حساب المسار. حاول مجددًا.", 504);
-      }
-      throw new RouteLookupError("تعذر الاتصال بخدمة حساب مسار القيادة. حاول مجددًا.", 502);
-    }
-
-    if (routeResponse.status === 429) {
-      throw new RouteLookupError("خدمة حساب المسار مشغولة حاليًا. انتظر قليلًا ثم حاول مجددًا.", 503);
-    }
-    if (!routeResponse.ok) {
-      throw new RouteLookupError("تعذر حساب مسار القيادة. حاول مجددًا.", 502);
-    }
-
-    let routeData: unknown;
-    try {
-      routeData = await routeResponse.json();
-    } catch {
-      throw new RouteLookupError("تعذر قراءة نتيجة حساب المسار. حاول مجددًا.", 502);
-    }
-
-    if (!isOsrmRouteResponse(routeData)) {
-      throw new RouteLookupError("استلمنا نتيجة غير صالحة لحساب المسار. حاول مجددًا.", 502);
-    }
-
-    const route = routeData.routes[0];
-    if (routeData.code !== "Ok" || !route) {
-      throw new RouteLookupError("لم نعثر على مسار قيادة بين الموقعين. تحقق من العنوانين وحاول مجددًا.", 422);
+    if (!route) {
+      throw new RouteLookupError("لم نعثر على مسار قيادة صالح بين الموقعين.", 422);
     }
 
     const tariffPeriod =
-      startTime >= NIGHT_TARIFF_START || startTime < NIGHT_TARIFF_END ? "ليلية" : "نهارية";
+      body.startTime >= NIGHT_TARIFF_START || body.startTime < NIGHT_TARIFF_END ? "ليلية" : "نهارية";
     const rateDZDPerKm = tariffPeriod === "ليلية" ? 5 : 4;
-    const mapUrl = new URL("https://www.openstreetmap.org/directions");
-    mapUrl.searchParams.set("engine", "fossgis_osrm_car");
-    mapUrl.searchParams.set(
-      "route",
-      `${originLocation.lat},${originLocation.lon};${destinationLocation.lat},${destinationLocation.lon}`
-    );
+    const mapUrl = new URL("https://www.google.com/maps/dir/");
+    mapUrl.searchParams.set("api", "1");
+    mapUrl.searchParams.set("origin", origin.formattedAddress);
+    mapUrl.searchParams.set("destination", destination.formattedAddress);
+    mapUrl.searchParams.set("travelmode", "driving");
 
     return NextResponse.json({
-      distanceKm: Math.round((route.distance / 1000) * 10) / 10,
-      durationMinutes: Math.round(route.duration / 60),
-      fareDZD: Math.round((route.distance / 1000) * rateDZDPerKm),
+      distanceKm: Math.round((route.distanceMeters / 1000) * 10) / 10,
+      durationMinutes: Math.round(route.durationSeconds / 60),
+      fareDZD: Math.round((route.distanceMeters / 1000) * rateDZDPerKm),
       rateDZDPerKm,
       tariffPeriod,
-      originName: originLocation.name || originLocation.display_name?.split(",")[0] || origin.trim(),
-      destinationName: destinationLocation.name || destinationLocation.display_name?.split(",")[0] || destination.trim(),
+      originName: origin.formattedAddress,
+      destinationName: destination.formattedAddress,
       mapUrl: mapUrl.toString()
     });
   } catch (error) {
     if (error instanceof RouteLookupError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error("Unexpected route distance lookup failure:", error);
+    console.error("Unexpected Google Maps route lookup failure:", error);
     return NextResponse.json({ error: "حدث خطأ غير متوقع أثناء حساب المسافة. حاول مجددًا." }, { status: 500 });
   }
 }
