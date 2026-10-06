@@ -13,6 +13,8 @@ npm run dev
 
 Enter an origin and destination in Algeria, then select **احسب المسافة والتكلفة** to estimate the driving distance and duration. The estimate uses OpenStreetMap's public Nominatim geocoder and OSRM routing service. Addresses entered in the form are sent to those services for lookup. Their public endpoints are rate-limited and have no availability guarantee, so this setup is suitable for a small demonstration; a production service with higher traffic should use a dedicated provider.
 
+When a search returns a province or region before a matching city, the app prefers the more specific result. The selected origin and destination names are shown with the route estimate so they can be checked against the map link.
+
 The estimate is based on the selected departure time and suggested driving route:
 
 - Daytime (06:00–21:59): **400 DZD per 100 km (4 DZD/km)**.

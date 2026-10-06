@@ -9,6 +9,8 @@ export type RouteQuote = {
   fareDZD: number;
   rateDZDPerKm: number;
   tariffPeriod: "نهارية" | "ليلية";
+  originName: string;
+  destinationName: string;
   mapUrl: string;
 };
 
@@ -35,6 +37,8 @@ function isRouteQuote(value: unknown): value is RouteQuote {
     typeof result.rateDZDPerKm === "number" &&
     Number.isFinite(result.rateDZDPerKm) &&
     (result.tariffPeriod === "نهارية" || result.tariffPeriod === "ليلية") &&
+    typeof result.originName === "string" &&
+    typeof result.destinationName === "string" &&
     typeof result.mapUrl === "string"
   );
 }

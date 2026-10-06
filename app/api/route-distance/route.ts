@@ -8,6 +8,9 @@ const NIGHT_TARIFF_END = "05:00";
 type GeocodingResult = {
   lat: string;
   lon: string;
+  name?: string;
+  display_name?: string;
+  addresstype?: string;
 };
 
 type OsrmRouteResponse = {
@@ -19,15 +22,19 @@ type OsrmRouteResponse = {
 };
 
 function isGeocodingResult(value: unknown): value is GeocodingResult {
-  if (typeof value !== "object" || value === null || !("lat" in value) || !("lon" in value)) {
+  if (typeof value !== "object" || value === null) {
     return false;
   }
 
+  const result = value as Record<string, unknown>;
   return (
-    typeof value.lat === "string" &&
-    typeof value.lon === "string" &&
-    Number.isFinite(Number(value.lat)) &&
-    Number.isFinite(Number(value.lon))
+    typeof result.lat === "string" &&
+    typeof result.lon === "string" &&
+    Number.isFinite(Number(result.lat)) &&
+    Number.isFinite(Number(result.lon)) &&
+    (result.name === undefined || typeof result.name === "string") &&
+    (result.display_name === undefined || typeof result.display_name === "string") &&
+    (result.addresstype === undefined || typeof result.addresstype === "string")
   );
 }
 
@@ -72,7 +79,7 @@ async function geocode(address: string, label: string): Promise<GeocodingResult>
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.searchParams.set("q", address);
   url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", "1");
+  url.searchParams.set("limit", "5");
   url.searchParams.set("countrycodes", "dz");
 
   let response: Response;
@@ -110,12 +117,20 @@ async function geocode(address: string, label: string): Promise<GeocodingResult>
     throw new RouteLookupError("استلمنا نتيجة غير صالحة للبحث عن الموقع. حاول مجددًا.", 502);
   }
 
-  const location = locations[0];
-  if (!isGeocodingResult(location)) {
+  const candidates = locations.filter(isGeocodingResult);
+  if (candidates.length === 0) {
     throw new RouteLookupError(`لم نعثر على ${label}. أضف اسم الحي والمدينة ثم حاول مجددًا.`, 422);
   }
 
-  return location;
+  const explicitlyAdministrative = /ولاية|wilaya|province|state/i.test(address);
+  if (explicitlyAdministrative) {
+    return candidates[0];
+  }
+
+  const preciseMatch = candidates.find(
+    (candidate) => !["state", "province", "region"].includes(candidate.addresstype ?? "")
+  );
+  return preciseMatch ?? candidates[0];
 }
 
 export async function POST(request: NextRequest) {
@@ -211,6 +226,8 @@ export async function POST(request: NextRequest) {
       fareDZD: Math.round((route.distance / 1000) * rateDZDPerKm),
       rateDZDPerKm,
       tariffPeriod,
+      originName: originLocation.name || originLocation.display_name?.split(",")[0] || origin.trim(),
+      destinationName: destinationLocation.name || destinationLocation.display_name?.split(",")[0] || destination.trim(),
       mapUrl: mapUrl.toString()
     });
   } catch (error) {

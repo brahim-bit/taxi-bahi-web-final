@@ -237,6 +237,7 @@ export default function BookingPage() {
             <p>خدمة مخصصة بانتظارك، مع متابعة دقيقة للتجهيز والاستقبال.</p>
             {quote ? (
               <div className="tb-route-result" role="status" aria-live="polite">
+                <span>المسار: من {quote.originName} إلى {quote.destinationName}.</span>
                 <span>تعرفة {quote.tariffPeriod}: {quote.rateDZDPerKm} دج/كم</span>
                 <a href={quote.mapUrl} target="_blank" rel="noopener noreferrer">عرض المسار على الخريطة</a>
               </div>
