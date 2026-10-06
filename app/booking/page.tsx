@@ -176,7 +176,7 @@ export default function BookingPage() {
 
             <label>
               الوقت
-              <input type="time" value={booking.time} onChange={(event) => updateBooking("time", event.target.value)} required />
+              <input type="time" lang="fr-DZ" dir="ltr" step={60} value={booking.time} onChange={(event) => updateBooking("time", event.target.value)} required />
             </label>
           </div>
 
