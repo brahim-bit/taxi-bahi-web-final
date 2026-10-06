@@ -55,6 +55,7 @@ export function useRouteQuote(origin: string, destination: string, startTime: st
     const controller = new AbortController();
     let requestTimeout: ReturnType<typeof setTimeout> | undefined;
     let didTimeout = false;
+    let isCurrentRequest = true;
 
     setQuote(null);
     setError("");
@@ -104,13 +105,13 @@ export function useRouteQuote(origin: string, destination: string, startTime: st
 
           setQuote(result);
         } catch (cause) {
-          if (!controller.signal.aborted) {
+          if (isCurrentRequest && !controller.signal.aborted) {
             setError(cause instanceof Error ? cause.message : "تعذر حساب المسافة. حاول مجددًا.");
-          } else if (didTimeout) {
+          } else if (isCurrentRequest && didTimeout) {
             setError("استغرق حساب المسافة وقتًا طويلًا. تحقق من الاتصال وحاول مجددًا.");
           }
         } finally {
-          if (!controller.signal.aborted) {
+          if (isCurrentRequest) {
             setIsCalculating(false);
           }
         }
@@ -118,6 +119,7 @@ export function useRouteQuote(origin: string, destination: string, startTime: st
     }, 700);
 
     return () => {
+      isCurrentRequest = false;
       clearTimeout(debounce);
       if (requestTimeout) {
         clearTimeout(requestTimeout);
